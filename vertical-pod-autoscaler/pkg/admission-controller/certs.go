@@ -17,12 +17,18 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"fmt"
 	"os"
-	"path"
 	"sync"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
 	"github.com/fsnotify/fsnotify"
+	typedadmregv1 "k8s.io/client-go/kubernetes/typed/admissionregistration/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -42,10 +48,12 @@ func readFile(filePath string) []byte {
 }
 
 type certReloader struct {
-	tlsCertPath string
-	tlsKeyPath  string
-	cert        *tls.Certificate
-	mu          sync.RWMutex
+	tlsCertPath  string
+	tlsKeyPath   string
+	clientCaPath string
+	cert         *tls.Certificate
+	mu           sync.RWMutex
+	mwc          typedadmregv1.MutatingWebhookConfigurationInterface
 }
 
 func (cr *certReloader) start(stop <-chan struct{}) error {
@@ -54,21 +62,40 @@ func (cr *certReloader) start(stop <-chan struct{}) error {
 		return err
 	}
 
-	if err = watcher.Add(path.Dir(cr.tlsCertPath)); err != nil {
+	if err = watcher.Add(cr.tlsCertPath); err != nil {
 		return err
 	}
-	if err = watcher.Add(path.Dir(cr.tlsKeyPath)); err != nil {
+	if err = watcher.Add(cr.tlsKeyPath); err != nil {
 		return err
 	}
+	if err = watcher.Add(cr.clientCaPath); err != nil {
+		return err
+	}
+
 	go func() {
 		defer watcher.Close()
 		for {
 			select {
 			case event := <-watcher.Events:
-				if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) {
-					klog.V(2).InfoS("New certificate found, reloading")
-					if err := cr.load(); err != nil {
-						klog.ErrorS(err, "Failed to reload certificate")
+				if event.Has(fsnotify.Remove) {
+					if event.Name == cr.tlsCertPath || event.Name == cr.tlsKeyPath {
+						klog.V(2).InfoS("New certificate found, reloading")
+						if err := cr.load(); err != nil {
+							klog.ErrorS(err, "Failed to reload certificate")
+						}
+						// watches get removed along with the symlinks, so we need to add them back
+						if err = watcher.Add(event.Name); err != nil {
+							klog.ErrorS(err, "Failed to add watcher for file")
+						}
+					} else if event.Name == cr.clientCaPath {
+						if err := cr.reloadWebhookCA(); err != nil {
+							klog.ErrorS(err, "Failed to reload client CA")
+						}
+						if err = watcher.Add(event.Name); err != nil {
+							klog.ErrorS(err, "Failed to add watcher for file")
+						}
+					} else {
+						klog.V(2).InfoS("Ignoring event", "eventname", event.Name, "eventop", event.Op)
 					}
 				}
 			case err := <-watcher.Errors:
@@ -90,6 +117,37 @@ func (cr *certReloader) load() error {
 	defer cr.mu.Unlock()
 	cr.cert = &cert
 	return nil
+}
+
+func (cr *certReloader) reloadWebhookCA() error {
+	client := cr.mwc
+	webhook, err := client.Get(context.TODO(), webhookConfigName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if webhook == nil {
+		return fmt.Errorf("webhook not found")
+	}
+	if len(webhook.Webhooks) > 0 {
+		currentBundle := webhook.Webhooks[0].ClientConfig.CABundle[:]
+		base64CurrentBundle := base64.StdEncoding.EncodeToString(currentBundle)
+		newBundle := readFile(cr.clientCaPath)
+		base64NewBundle := base64.StdEncoding.EncodeToString(newBundle)
+		// make sure clientCA actually changed
+		if base64CurrentBundle == base64NewBundle {
+			klog.V(2).InfoS("Client CA did not change, skipping patch")
+			return nil
+		}
+		klog.V(2).InfoS("New client CA found, reloading and patching webhook")
+		patch := []byte(fmt.Sprintf(`{"webhooks":[{"name":"%s","clientConfig":{"caBundle":"%s"}}]}`, webhookName, base64NewBundle))
+		_, err2 := client.Patch(context.TODO(), webhookConfigName, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+		if err2 != nil {
+			return err2
+		}
+		return nil
+	} else {
+		return fmt.Errorf("webhook configuration has no webhooks")
+	}
 }
 
 func (cr *certReloader) getCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {

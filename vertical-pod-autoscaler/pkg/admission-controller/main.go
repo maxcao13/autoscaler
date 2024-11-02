@@ -144,7 +144,7 @@ func main() {
 	})
 	server := &http.Server{
 		Addr:      fmt.Sprintf(":%d", *port),
-		TLSConfig: configTLS(*certsConfiguration, *minTlsVersion, *ciphers, stopCh),
+		TLSConfig: configTLS(*certsConfiguration, *minTlsVersion, *ciphers, stopCh, kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations()),
 	}
 	url := fmt.Sprintf("%v:%v", *webhookAddress, *webhookPort)
 	ignoredNamespaces := strings.Split(*ignoredVpaObjectNamespaces, ",")
