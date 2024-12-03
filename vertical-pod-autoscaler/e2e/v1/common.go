@@ -315,6 +315,13 @@ func InstallVPA(f *framework.Framework, vpa *vpa_types.VerticalPodAutoscaler) {
 	}
 }
 
+func JSONPatchDeployment(f *framework.Framework, deployment *appsv1.Deployment, patch *patchRecord) {
+	patchBytes, err := json.Marshal([]patchRecord{*patch})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	_, err = f.ClientSet.AppsV1().Deployments(f.Namespace.Name).Patch(context.TODO(), deployment.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "unexpected error patching deployment")
+}
+
 func isStatusEmpty(status *vpa_types.VerticalPodAutoscalerStatus) bool {
 	if status == nil {
 		return true
