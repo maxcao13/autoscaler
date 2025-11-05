@@ -44,8 +44,6 @@ const (
 
 	// RecommenderDeploymentName is VPA recommender deployment name
 	RecommenderDeploymentName = "vpa-recommender"
-	// RecommenderNamespace is namespace to deploy VPA recommender
-	RecommenderNamespace = "kube-system"
 	// PollInterval is interval for polling
 	PollInterval = 10 * time.Second
 	// PollTimeout is timeout for polling
