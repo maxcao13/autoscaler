@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -33,7 +34,7 @@ import (
 )
 
 func readFile(filePath string) []byte {
-	res, err := os.ReadFile(filePath)
+	res, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		klog.ErrorS(err, "Error reading certificate file", "file", filePath)
 		return nil

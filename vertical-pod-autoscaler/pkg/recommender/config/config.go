@@ -19,6 +19,7 @@ package config
 import (
 	"flag"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -277,7 +278,7 @@ func ValidateRecommenderConfig(config *RecommenderConfig) {
 	}
 
 	if config.PrometheusBearerTokenFile != "" {
-		fileContent, err := os.ReadFile(config.PrometheusBearerTokenFile)
+		fileContent, err := os.ReadFile(filepath.Clean(config.PrometheusBearerTokenFile))
 		if err != nil {
 			klog.ErrorS(err, "Unable to read bearer token file", "filename", config.PrometheusBearerTokenFile)
 			klog.FlushAndExit(klog.ExitFlushTimeout, 1)

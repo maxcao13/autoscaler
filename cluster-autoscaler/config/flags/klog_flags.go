@@ -58,6 +58,7 @@ func ComputeLoggingOptions(fs *pflag.FlagSet) (*logsapi.LoggingOptions, error) {
 	var infoW, errW io.Writer = os.Stderr, os.Stderr
 
 	if logFilePath != "" && !logToStderr {
+		logFilePath = filepath.Clean(logFilePath)
 		dir := filepath.Dir(logFilePath)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create log directory %q: %w", dir, err)
